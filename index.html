@@ -84,33 +84,96 @@
         /* 印刷用スタイル */
         @media print {
             @page {
-                size: A4 portrait;
-                margin: 10mm;
+                size: A4;
+                margin: 8mm;
             }
 
-            body {
+            html, body {
+                width: 100% !important;
+                height: auto !important;
                 background-color: #ffffff !important;
                 color: #000000 !important;
                 padding: 0 !important;
                 margin: 0 !important;
+                display: block !important;
             }
 
             .no-print {
                 display: none !important;
             }
 
+            /* メインコンテナのグリッドや最大幅制限を解除して全画面化 */
+            #mainLayout {
+                display: block !important;
+                max-width: none !important;
+                width: 100% !important;
+                padding: 0 !important;
+                margin: 0 !important;
+            }
+
+            #previewMain {
+                display: block !important;
+                width: 100% !important;
+                padding: 0 !important;
+                margin: 0 !important;
+            }
+
             .manuscript-container {
+                display: block !important;
                 padding: 0 !important;
                 margin: 0 !important;
                 width: 100% !important;
+                overflow: visible !important;
             }
 
             .manuscript-page {
+                width: 100% !important;
+                height: 278mm !important;
+                box-sizing: border-box !important;
                 box-shadow: none !important;
-                margin: 0 auto 0 auto !important;
+                border: none !important;
+                padding: 4mm !important;
+                margin: 0 !important;
                 border-radius: 0 !important;
+                display: flex !important;
+                flex-direction: column !important;
+                justify-content: center !important;
+                align-items: center !important;
                 page-break-after: always !important;
                 break-after: page !important;
+            }
+
+            .manuscript-page:last-child {
+                page-break-after: auto !important;
+                break-after: auto !important;
+            }
+
+            .manuscript-outer-frame {
+                width: 100% !important;
+                flex: 1 !important;
+                display: flex !important;
+                flex-direction: column !important;
+                box-sizing: border-box !important;
+            }
+
+            .manuscript-grid {
+                width: 100% !important;
+                height: 100% !important;
+                flex: 1 !important;
+            }
+
+            .manuscript-row {
+                flex: 1 !important;
+                width: 100% !important;
+                height: 100% !important;
+            }
+
+            /* マス目をA4用紙全体いっぱいに自動拡大 */
+            .grid-cell {
+                width: auto !important;
+                height: auto !important;
+                flex: 1 1 0% !important;
+                font-size: var(--print-font-size, 22pt) !important;
             }
         }
 
@@ -164,7 +227,7 @@
     </header>
 
     <!-- メインコンテンツ -->
-    <div class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+    <div id="mainLayout" class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
 
         <!-- 左側：設定 & テキスト入力パネル (no-print) -->
         <aside class="no-print lg:col-span-4 flex flex-col space-y-5 ui-font">
@@ -296,7 +359,7 @@
         </aside>
 
         <!-- 右側：原稿用紙 プレビュー & 表示エリア -->
-        <main class="lg:col-span-8 flex flex-col items-center">
+        <main id="previewMain" class="lg:col-span-8 flex flex-col items-center">
             
             <div class="no-print w-full flex items-center justify-between mb-3 px-2 ui-font">
                 <div class="flex items-center space-x-2 text-sm text-slate-600 font-medium">
@@ -622,8 +685,20 @@
                 const cellSize = maxDim <= 15 ? 34 : (maxDim <= 20 ? 28 : (maxDim <= 30 ? 22 : 18));
                 const fontSize = Math.floor(cellSize * 0.62);
 
-                manuscriptContainer.innerHTML = '';
+                // 印刷時のA4用紙サイズに合わせた最適な文字サイズ（pt）を計算
                 const isVertical = state.direction === 'vertical';
+                const printFontSizePt = Math.max(8, Math.min(28, Math.floor(420 / maxDim)));
+
+                // 縦書き時はA4横向き、横書き時はA4縦向きに自動最適化
+                let printPageStyle = document.getElementById('dynamicPrintPageStyle');
+                if (!printPageStyle) {
+                    printPageStyle = document.createElement('style');
+                    printPageStyle.id = 'dynamicPrintPageStyle';
+                    document.head.appendChild(printPageStyle);
+                }
+                printPageStyle.textContent = `@media print { @page { size: A4 ${isVertical ? 'landscape' : 'portrait'}; margin: 8mm; } .manuscript-page { height: ${isVertical ? '192mm' : '279mm'} !important; } }`;
+
+                manuscriptContainer.innerHTML = '';
 
                 pagesData.forEach((pageLines, pageIndex) => {
                     const pageWrapper = document.createElement('div');
@@ -631,7 +706,7 @@
 
                     // 用紙上部ヘッダー（ページ番号・仕様表示）
                     const pageHeader = document.createElement('div');
-                    pageHeader.className = 'w-full flex justify-between items-center text-[11px] mb-2 ui-font';
+                    pageHeader.className = 'w-full flex justify-between items-center text-[11px] mb-2 ui-font shrink-0';
                     pageHeader.style.color = borderColor;
                     pageHeader.innerHTML = `
                         <span>${state.cols}字 × ${state.rows}行 (${state.cols * state.rows}字詰)</span>
@@ -641,15 +716,17 @@
 
                     // 外枠フレーム
                     const outerFrame = document.createElement('div');
+                    outerFrame.className = 'manuscript-outer-frame';
                     outerFrame.style.border = `2px solid ${borderColor}`;
                     outerFrame.style.padding = '3px';
                     outerFrame.style.backgroundColor = '#fffefb';
 
                     // グリッド本体
                     const gridContainer = document.createElement('div');
-                    gridContainer.className = isVertical ? 'writing-vertical flex flex-col' : 'writing-horizontal flex flex-col';
+                    gridContainer.className = (isVertical ? 'writing-vertical flex flex-col' : 'writing-horizontal flex flex-col') + ' manuscript-grid';
                     gridContainer.style.border = `1px solid ${borderColor}`;
                     gridContainer.style.setProperty('--cell-font-size', `${fontSize}px`);
+                    gridContainer.style.setProperty('--print-font-size', `${printFontSizePt}pt`);
 
                     const midRowIndex = Math.floor(state.rows / 2);
 
@@ -660,7 +737,7 @@
                         }
 
                         const rowEl = document.createElement('div');
-                        rowEl.className = 'flex';
+                        rowEl.className = 'flex manuscript-row';
                         if (!isVertical) {
                             rowEl.style.flexDirection = 'row';
                         }
