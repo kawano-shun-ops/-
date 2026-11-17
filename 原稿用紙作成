@@ -1,0 +1,990 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>原稿用紙エディタ & 印刷</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Shippori Mincho for Japanese manuscript styling -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;500;600;700&family=Zen+Maru+Gothic:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        body {
+            font-family: 'Shippori Mincho', serif, 'Yu Mincho', 'Hiragino Mincho ProN', serif;
+            background-color: #f3f4f6;
+            color: #1f2937;
+        }
+
+        .ui-font {
+            font-family: 'Zen Maru Gothic', system-ui, sans-serif;
+        }
+
+        /* 縦書き設定 */
+        .writing-vertical {
+            writing-mode: vertical-rl;
+            text-orientation: upright;
+            -webkit-writing-mode: vertical-rl;
+        }
+
+        /* 横書き設定 */
+        .writing-horizontal {
+            writing-mode: horizontal-tb;
+            text-orientation: mixed;
+            -webkit-writing-mode: horizontal-tb;
+        }
+
+        /* 原稿用紙マス目スタイル */
+        .grid-cell {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-style: solid;
+            box-sizing: border-box;
+            line-height: 1;
+            font-size: var(--cell-font-size, 18px);
+            user-select: text;
+            position: relative;
+        }
+
+        /* ぶら下げ（1マスに文字と句読点等を同梱）の配置調整 */
+        .hanging-punct {
+            position: absolute;
+            font-size: 0.65em;
+            line-height: 1;
+            pointer-events: none;
+        }
+
+        /* 縦書き時のぶら下げ位置（マス目の左下または右下隅） */
+        .writing-vertical .hanging-punct {
+            bottom: 1px;
+            left: 1px;
+        }
+
+        /* 横書き時のぶら下げ位置（マス目の右下隅） */
+        .writing-horizontal .hanging-punct {
+            bottom: 1px;
+            right: 1px;
+        }
+
+        /* 原稿用紙フレーム */
+        .manuscript-page {
+            background-color: #fffefb;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+            position: relative;
+            margin-bottom: 2rem;
+            page-break-after: always;
+            break-after: page;
+        }
+
+        /* 印刷用スタイル */
+        @media print {
+            @page {
+                size: A4 portrait;
+                margin: 10mm;
+            }
+
+            body {
+                background-color: #ffffff !important;
+                color: #000000 !important;
+                padding: 0 !important;
+                margin: 0 !important;
+            }
+
+            .no-print {
+                display: none !important;
+            }
+
+            .manuscript-container {
+                padding: 0 !important;
+                margin: 0 !important;
+                width: 100% !important;
+            }
+
+            .manuscript-page {
+                box-shadow: none !important;
+                margin: 0 auto 0 auto !important;
+                border-radius: 0 !important;
+                page-break-after: always !important;
+                break-after: page !important;
+            }
+        }
+
+        /* スクロールバーのカスタマイズ */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col bg-slate-100 text-slate-800">
+
+    <!-- ヘッダー -->
+    <header class="no-print bg-slate-900 text-white shadow-md sticky top-0 z-50 ui-font">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <i class="fa-solid fa-book-bookmark text-amber-500 text-2xl"></i>
+                <h1 class="text-xl font-bold tracking-wider">原稿用紙エディタ</h1>
+                <span class="text-xs bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full font-medium hidden sm:inline-block">印刷 & 保存対応</span>
+            </div>
+            
+            <div class="flex items-center space-x-2 sm:space-x-3">
+                <button id="btnSave" type="button" class="bg-slate-700 hover:bg-slate-600 text-white px-3 py-2 rounded-lg text-sm font-medium transition flex items-center space-x-1.5 shadow-sm">
+                    <i class="fa-solid fa-floppy-disk"></i>
+                    <span class="hidden sm:inline">保存</span>
+                </button>
+                <button id="btnLoadModal" type="button" class="bg-slate-700 hover:bg-slate-600 text-white px-3 py-2 rounded-lg text-sm font-medium transition flex items-center space-x-1.5 shadow-sm">
+                    <i class="fa-solid fa-folder-open"></i>
+                    <span class="hidden sm:inline">開く</span>
+                </button>
+                <button id="btnExportTxt" type="button" class="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-2 rounded-lg text-sm font-medium transition flex items-center space-x-1.5 shadow-sm" title="テキストファイル出力">
+                    <i class="fa-solid fa-file-arrow-down"></i>
+                    <span class="hidden md:inline">.txt保存</span>
+                </button>
+                <button id="btnPrint" type="button" class="bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition flex items-center space-x-2 shadow">
+                    <i class="fa-solid fa-print"></i>
+                    <span>印刷する</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- メインコンテンツ -->
+    <div class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+        <!-- 左側：設定 & テキスト入力パネル (no-print) -->
+        <aside class="no-print lg:col-span-4 flex flex-col space-y-5 ui-font">
+
+            <!-- 1. リアルタイム統計パネル（条件③） -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center justify-between">
+                    <span><i class="fa-solid fa-chart-simple mr-1.5 text-amber-500"></i>文字数カウント</span>
+                    <span class="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded">空白・改行除く</span>
+                </h2>
+                
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="bg-amber-50/60 border border-amber-200/60 p-3 rounded-xl">
+                        <div class="text-xs text-amber-800 font-medium">入力文字数 (除外後)</div>
+                        <div id="charCountNoSpaces" class="text-2xl font-black text-amber-900 mt-1">0</div>
+                        <div class="text-[10px] text-amber-700/80 mt-0.5">※空白・改行を含まない</div>
+                    </div>
+                    <div class="bg-slate-50 border border-slate-200 p-3 rounded-xl">
+                        <div class="text-xs text-slate-500 font-medium">総文字数 (全含)</div>
+                        <div id="charCountTotal" class="text-2xl font-bold text-slate-700 mt-1">0</div>
+                        <div class="text-[10px] text-slate-400 mt-0.5">※スペース・改行含む</div>
+                    </div>
+                </div>
+
+                <div class="mt-3 pt-3 border-t border-slate-100 flex justify-between items-center text-xs text-slate-600">
+                    <span>原稿用紙換算枚数:</span>
+                    <span class="font-bold text-slate-800"><span id="pageCount">1</span> 枚分 (<span id="perPageTotal">400</span>字詰め)</span>
+                </div>
+            </div>
+
+            <!-- 2. 設定パネル（条件①・②） -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4">
+                <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 flex items-center">
+                    <i class="fa-solid fa-sliders mr-1.5 text-amber-500"></i>用紙・レイアウト設定
+                </h2>
+
+                <!-- ① 縦書き・横書きの指定 -->
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1.5">書字方向 (縦書き / 横書き)</label>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button id="btnDirVertical" type="button" class="dir-btn py-2 px-3 rounded-xl border text-sm font-medium flex items-center justify-center space-x-2 transition bg-white text-slate-700 border-slate-200 hover:bg-slate-50" data-dir="vertical">
+                            <i class="fa-solid fa-arrows-up-down"></i>
+                            <span>縦書き</span>
+                        </button>
+                        <button id="btnDirHorizontal" type="button" class="dir-btn py-2 px-3 rounded-xl border text-sm font-medium flex items-center justify-center space-x-2 transition bg-amber-500 text-white border-amber-600 shadow-sm" data-dir="horizontal">
+                            <i class="fa-solid fa-arrows-left-right"></i>
+                            <span>横書き</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- ② 行と列の文字数の指定 -->
+                <div class="grid grid-cols-2 gap-3 pt-2">
+                    <div>
+                        <label for="inputCols" class="block text-xs font-semibold text-slate-700 mb-1">
+                            1行の文字数 (列)
+                        </label>
+                        <input type="number" id="inputCols" min="5" max="40" value="20" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white">
+                    </div>
+                    <div>
+                        <label for="inputRows" class="block text-xs font-semibold text-slate-700 mb-1">
+                            1ページの行数 (行)
+                        </label>
+                        <input type="number" id="inputRows" min="5" max="40" value="20" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white">
+                    </div>
+                </div>
+
+                <!-- 枠線カラー設定 -->
+                <div class="pt-2">
+                    <label class="block text-xs font-semibold text-slate-700 mb-1.5">原稿用紙の枠線色</label>
+                    <div class="flex items-center space-x-3">
+                        <label class="cursor-pointer flex items-center space-x-1.5 text-xs text-slate-600">
+                            <input type="radio" name="gridColor" value="green" checked class="text-amber-600 focus:ring-amber-500">
+                            <span class="w-3.5 h-3.5 rounded-full bg-emerald-700 inline-block"></span>
+                            <span>緑枠 (伝統)</span>
+                        </label>
+                        <label class="cursor-pointer flex items-center space-x-1.5 text-xs text-slate-600">
+                            <input type="radio" name="gridColor" value="red" class="text-amber-600 focus:ring-amber-500">
+                            <span class="w-3.5 h-3.5 rounded-full bg-red-600 inline-block"></span>
+                            <span>朱色</span>
+                        </label>
+                        <label class="cursor-pointer flex items-center space-x-1.5 text-xs text-slate-600">
+                            <input type="radio" name="gridColor" value="gray" class="text-amber-600 focus:ring-amber-500">
+                            <span class="w-3.5 h-3.5 rounded-full bg-slate-500 inline-block"></span>
+                            <span>グレー</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- ⑥ 原稿用紙ルールの有効化設定（条件⑥） -->
+                <div class="pt-3 border-t border-slate-100">
+                    <label class="flex items-center justify-between cursor-pointer">
+                        <span class="text-xs font-semibold text-slate-700 flex items-center">
+                            <i class="fa-solid fa-list-check text-amber-500 mr-1.5"></i>
+                            原稿用紙ルール (禁忌・ぶら下げ)
+                        </span>
+                        <input type="checkbox" id="chkManuscriptRules" checked class="sr-only peer">
+                        <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-600 relative"></div>
+                    </label>
+                    <p class="text-[11px] text-slate-400 mt-1 leading-normal">
+                        句読点や閉じ括弧が列の先頭に来る場合、前の行の最後のマス目に文字と一緒に収めます（行末ぶら下げ処理）。
+                    </p>
+                </div>
+
+                <!-- プリセットボタン -->
+                <div class="pt-2 border-t border-slate-100 flex flex-wrap gap-1.5">
+                    <span class="text-[11px] text-slate-400 w-full mb-0.5">クイック設定:</span>
+                    <button type="button" class="btn-preset text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1 rounded-md transition" data-cols="20" data-rows="20">20×20 (400字)</button>
+                    <button type="button" class="btn-preset text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1 rounded-md transition" data-cols="20" data-rows="10">20×10 (200字)</button>
+                    <button type="button" class="btn-preset text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1 rounded-md transition" data-cols="10" data-rows="10">10×10 (100字)</button>
+                </div>
+            </div>
+
+            <!-- 3. エディタ入力エリア -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex-1 flex flex-col">
+                <div class="flex items-center justify-between mb-2">
+                    <label for="textInput" class="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center">
+                        <i class="fa-solid fa-pen-to-square mr-1.5 text-amber-500"></i>文章入力フォーム
+                    </label>
+                    <button id="btnClear" type="button" class="text-xs text-slate-400 hover:text-red-500 transition flex items-center space-x-1">
+                        <i class="fa-regular fa-trash-can"></i>
+                        <span>クリア</span>
+                    </button>
+                </div>
+                <p class="text-xs text-slate-500 mb-2">ここに文章を入力すると、右側の原稿用紙にリアルタイム反映されます。</p>
+                <textarea id="textInput" class="w-full flex-1 min-h-[220px] p-3 border border-slate-300 rounded-xl font-serif text-base text-slate-800 leading-relaxed focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white resize-none shadow-inner" placeholder="ここに文章を入力してください。改行や段落インデント（行頭一字下げ）も原稿用紙のマス目に反映されます..."></textarea>
+            </div>
+
+        </aside>
+
+        <!-- 右側：原稿用紙 プレビュー & 表示エリア -->
+        <main class="lg:col-span-8 flex flex-col items-center">
+            
+            <div class="no-print w-full flex items-center justify-between mb-3 px-2 ui-font">
+                <div class="flex items-center space-x-2 text-sm text-slate-600 font-medium">
+                    <i class="fa-solid fa-eye text-amber-500"></i>
+                    <span>原稿用紙 プレビュー</span>
+                </div>
+                <div class="text-xs text-slate-400">
+                    ※ 印刷時は操作枠が消え、用紙のみがきれいに出力されます。
+                </div>
+            </div>
+
+            <!-- 原稿用紙ページ群コンテナ -->
+            <div id="manuscriptContainer" class="manuscript-container w-full flex flex-col items-center overflow-x-auto pb-10">
+                <!-- JavaScriptでここに .manuscript-page が生成されます -->
+            </div>
+
+        </main>
+
+    </div>
+
+    <!-- 下書き保存 / 開く モーダルダイアログ (no-print) -->
+    <div id="modalSaveLoad" class="no-print fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden ui-font">
+        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100 flex flex-col max-h-[85vh]">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+                <h3 class="text-lg font-bold text-slate-800 flex items-center">
+                    <i class="fa-solid fa-folder-open text-amber-500 mr-2"></i>保存された下書き一覧
+                </h3>
+                <button id="btnCloseModal" type="button" class="text-slate-400 hover:text-slate-600 p-1 rounded-lg">
+                    <i class="fa-solid fa-xmark text-xl"></i>
+                </button>
+            </div>
+
+            <!-- 新規保存入力フォーム -->
+            <div class="mb-4 bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
+                <label for="draftTitle" class="block text-xs font-semibold text-slate-700">現在の文章を保存</label>
+                <div class="flex space-x-2">
+                    <input type="text" id="draftTitle" placeholder="タイトルを入力..." class="flex-1 bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500">
+                    <button id="btnConfirmSave" type="button" class="bg-amber-600 hover:bg-amber-500 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition flex items-center space-x-1 shrink-0">
+                        <i class="fa-solid fa-plus"></i>
+                        <span>保存</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- リスト表示エリア -->
+            <div class="flex-1 overflow-y-auto space-y-2 pr-1" id="draftsList">
+                <!-- JavaScriptで一覧挿入 -->
+            </div>
+        </div>
+    </div>
+
+    <!-- カスタム通知・確認モーダル (no-print) -->
+    <div id="customDialog" class="no-print fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4 hidden ui-font">
+        <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-100">
+            <h4 id="dialogTitle" class="text-base font-bold text-slate-800 mb-2">確認</h4>
+            <p id="dialogMessage" class="text-sm text-slate-600 mb-5 leading-relaxed"></p>
+            <div class="flex justify-end space-x-2">
+                <button id="dialogBtnCancel" type="button" class="px-4 py-2 rounded-xl text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 transition">キャンセル</button>
+                <button id="dialogBtnOk" type="button" class="px-4 py-2 rounded-xl text-sm font-medium text-white bg-amber-600 hover:bg-amber-500 transition shadow-sm">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- トースト通知 (no-print) -->
+    <div id="toastNotification" class="no-print fixed bottom-5 right-5 z-[70] bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg text-sm font-medium flex items-center space-x-2 transform translate-y-20 opacity-0 transition-all duration-300 pointer-events-none ui-font">
+        <i id="toastIcon" class="fa-solid fa-circle-check text-amber-400"></i>
+        <span id="toastMessage">保存しました</span>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // アプリケーション状態管理
+            const state = {
+                direction: 'horizontal', // 'horizontal' (基本設定) or 'vertical'
+                cols: 20,
+                rows: 20,
+                color: 'green',
+                applyRules: true
+            };
+
+            // 禁則処理文字セット
+            const LINE_START_PROHIBITED = new Set([
+                '。', '、', '．', '，', '.', ',',
+                '」', '』', '）', '】', '〕', '〉', '》', '｝', '］', ')', ']', '}',
+                '！', '？', '!', '?', '・', '：', '；', ':', ';', 'ー', '〜', '～',
+                'ぁ', 'ぃ', 'ぅ', 'ぇ', 'ぉ', 'っ', 'ゃ', 'ゅ', 'ょ', 'ゎ',
+                'ァ', 'ィ', 'ゥ', 'ェ', 'ォ', 'ッ', 'ャ', 'ュ', 'ョ', 'ヮ', 'ヵ', 'ヶ'
+            ]);
+
+            const LINE_END_PROHIBITED = new Set([
+                '「', '『', '（', '【', '〔', '〈', '《', '｛', '［', '(', '[', '{'
+            ]);
+
+            // DOM要素の取得
+            const textInput = document.getElementById('textInput');
+            const manuscriptContainer = document.getElementById('manuscriptContainer');
+            const charCountNoSpaces = document.getElementById('charCountNoSpaces');
+            const charCountTotal = document.getElementById('charCountTotal');
+            const pageCount = document.getElementById('pageCount');
+            const perPageTotal = document.getElementById('perPageTotal');
+
+            const btnDirVertical = document.getElementById('btnDirVertical');
+            const btnDirHorizontal = document.getElementById('btnDirHorizontal');
+            const inputCols = document.getElementById('inputCols');
+            const inputRows = document.getElementById('inputRows');
+            const chkManuscriptRules = document.getElementById('chkManuscriptRules');
+            const btnClear = document.getElementById('btnClear');
+            const btnPrint = document.getElementById('btnPrint');
+            const btnExportTxt = document.getElementById('btnExportTxt');
+            const btnSave = document.getElementById('btnSave');
+            const btnLoadModal = document.getElementById('btnLoadModal');
+
+            const modalSaveLoad = document.getElementById('modalSaveLoad');
+            const btnCloseModal = document.getElementById('btnCloseModal');
+            const draftTitle = document.getElementById('draftTitle');
+            const btnConfirmSave = document.getElementById('btnConfirmSave');
+            const draftsList = document.getElementById('draftsList');
+
+            // カスタム通知・ダイアログ要素
+            const customDialog = document.getElementById('customDialog');
+            const dialogTitle = document.getElementById('dialogTitle');
+            const dialogMessage = document.getElementById('dialogMessage');
+            const dialogBtnCancel = document.getElementById('dialogBtnCancel');
+            const dialogBtnOk = document.getElementById('dialogBtnOk');
+            const toastNotification = document.getElementById('toastNotification');
+            const toastIcon = document.getElementById('toastIcon');
+            const toastMessage = document.getElementById('toastMessage');
+
+            // トースト通知表示関数
+            let toastTimeout;
+            function showToast(message, isError = false) {
+                toastMessage.textContent = message;
+                toastIcon.className = isError 
+                    ? 'fa-solid fa-circle-exclamation text-red-400' 
+                    : 'fa-solid fa-circle-check text-amber-400';
+                
+                toastNotification.classList.remove('translate-y-20', 'opacity-0');
+                clearTimeout(toastTimeout);
+                toastTimeout = setTimeout(() => {
+                    toastNotification.classList.add('translate-y-20', 'opacity-0');
+                }, 3000);
+            }
+
+            // カスタム確認ダイアログ関数
+            function showConfirm(message, title = '確認') {
+                return new Promise((resolve) => {
+                    dialogTitle.textContent = title;
+                    dialogMessage.textContent = message;
+                    dialogBtnCancel.classList.remove('hidden');
+                    customDialog.classList.remove('hidden');
+
+                    const cleanup = () => {
+                        customDialog.classList.add('hidden');
+                        dialogBtnOk.removeEventListener('click', onOk);
+                        dialogBtnCancel.removeEventListener('click', onCancel);
+                    };
+
+                    const onOk = () => { cleanup(); resolve(true); };
+                    const onCancel = () => { cleanup(); resolve(false); };
+
+                    dialogBtnOk.addEventListener('click', onOk);
+                    dialogBtnCancel.addEventListener('click', onCancel);
+                });
+            }
+
+            // メモリ上の下書きバックアップ（ストレージ制限対策）
+            let memoryDrafts = [];
+            try {
+                const stored = localStorage.getItem('genkou_saved_drafts');
+                if (stored) memoryDrafts = JSON.parse(stored);
+            } catch (e) {
+                console.warn('localStorage読み込みエラー:', e);
+            }
+
+            /**
+             * テキストを原稿用紙のマス目データ（ページ・行・列）に変換する
+             */
+            function formatTextToGrids(text, cols, rows, applyRules) {
+                const paragraphs = text.split('\n');
+                const allLines = [];
+
+                paragraphs.forEach((para) => {
+                    const chars = Array.from(para);
+                    if (chars.length === 0) {
+                        // 空行
+                        allLines.push(new Array(cols).fill(null));
+                        return;
+                    }
+
+                    let currentLine = [];
+                    let idx = 0;
+
+                    while (idx < chars.length) {
+                        const ch = chars[idx];
+
+                        if (applyRules) {
+                            // 1. 行頭禁則処理（句読点・閉じ括弧などが行頭に来る場合、前の行の最終マスにぶら下げる）
+                            if (currentLine.length === 0 && LINE_START_PROHIBITED.has(ch) && allLines.length > 0) {
+                                const prevLine = allLines[allLines.length - 1];
+                                let lastIdx = -1;
+                                for (let k = cols - 1; k >= 0; k--) {
+                                    if (prevLine[k] !== null) {
+                                        lastIdx = k;
+                                        break;
+                                    }
+                                }
+                                if (lastIdx !== -1) {
+                                    prevLine[lastIdx].hanging = (prevLine[lastIdx].hanging || '') + ch;
+                                    idx++;
+                                    continue;
+                                }
+                            }
+
+                            // 2. 行末禁則処理（開き括弧が行の最後のマスに来る場合、次の行へ送る）
+                            if (currentLine.length === cols - 1 && LINE_END_PROHIBITED.has(ch)) {
+                                while (currentLine.length < cols) {
+                                    currentLine.push(null);
+                                }
+                                allLines.push(currentLine);
+                                currentLine = [];
+                                continue;
+                            }
+                        }
+
+                        currentLine.push({ char: ch, hanging: '' });
+                        idx++;
+
+                        if (currentLine.length === cols) {
+                            allLines.push(currentLine);
+                            currentLine = [];
+                        }
+                    }
+
+                    if (currentLine.length > 0) {
+                        while (currentLine.length < cols) {
+                            currentLine.push(null);
+                        }
+                        allLines.push(currentLine);
+                    }
+                });
+
+                // 最低1行は確保
+                if (allLines.length === 0) {
+                    allLines.push(new Array(cols).fill(null));
+                }
+
+                // ページごとに分割
+                const pages = [];
+                for (let i = 0; i < allLines.length; i += rows) {
+                    const pageLines = allLines.slice(i, i + rows);
+                    while (pageLines.length < rows) {
+                        pageLines.push(new Array(cols).fill(null));
+                    }
+                    pages.push(pageLines);
+                }
+
+                return pages;
+            }
+
+            /**
+             * 条件③: 入力文字数のカウント (空白、改行は除く) ＆ 統計計算
+             */
+            function updateCharacterCount() {
+                const rawText = textInput.value;
+                // 空白（半角・全角スペース、タブ）と改行を除外した文字数
+                const noSpacesText = rawText.replace(/[\s\u3000\r\n]/g, '');
+                
+                charCountNoSpaces.textContent = noSpacesText.length.toLocaleString();
+                charCountTotal.textContent = rawText.length.toLocaleString();
+
+                const totalPerPage = state.cols * state.rows;
+                perPageTotal.textContent = totalPerPage.toLocaleString();
+
+                // 必要ページ数の計算
+                const pagesData = formatTextToGrids(rawText, state.cols, state.rows, state.applyRules);
+                pageCount.textContent = pagesData.length;
+
+                // ローカルストレージに自動一時保存
+                try {
+                    localStorage.setItem('genkou_current_text', rawText);
+                } catch (e) {}
+            }
+
+            /**
+             * 魚尾（原稿用紙中央の折り目マーク）を生成する
+             */
+            function createFishtailElement(borderColor, isVertical) {
+                const fishtail = document.createElement('div');
+                fishtail.className = 'flex items-center justify-center pointer-events-none select-none';
+                if (isVertical) {
+                    fishtail.style.width = '14px';
+                    fishtail.style.height = '100%';
+                    fishtail.style.borderLeft = `1px solid ${borderColor}`;
+                    fishtail.style.borderRight = `1px solid ${borderColor}`;
+                    fishtail.innerHTML = `<span style="color:${borderColor}; font-size:10px;">【</span>`;
+                } else {
+                    fishtail.style.height = '14px';
+                    fishtail.style.width = '100%';
+                    fishtail.style.borderTop = `1px solid ${borderColor}`;
+                    fishtail.style.borderBottom = `1px solid ${borderColor}`;
+                    fishtail.innerHTML = `<span style="color:${borderColor}; font-size:10px; transform:rotate(90deg); display:inline-block;">【</span>`;
+                }
+                return fishtail;
+            }
+
+            /**
+             * 条件①・②・⑥: 原稿用紙のレンダリング (縦書き/横書き & 行・列指定 & 禁忌ルール)
+             */
+            function renderManuscript() {
+                const rawText = textInput.value;
+                const pagesData = formatTextToGrids(rawText, state.cols, state.rows, state.applyRules);
+
+                // 枠線カラー設定
+                const colorMap = {
+                    green: '#15803d', // emerald-700
+                    red: '#dc2626',   // red-600
+                    gray: '#64748b'   // slate-500
+                };
+                const borderColor = colorMap[state.color] || colorMap.green;
+
+                // マス目サイズの自動計算（画面幅や行数・列数に合わせて見やすく調整）
+                const maxDim = Math.max(state.cols, state.rows);
+                const cellSize = maxDim <= 15 ? 34 : (maxDim <= 20 ? 28 : (maxDim <= 30 ? 22 : 18));
+                const fontSize = Math.floor(cellSize * 0.62);
+
+                manuscriptContainer.innerHTML = '';
+                const isVertical = state.direction === 'vertical';
+
+                pagesData.forEach((pageLines, pageIndex) => {
+                    const pageWrapper = document.createElement('div');
+                    pageWrapper.className = 'manuscript-page p-6 sm:p-8 rounded-lg border border-slate-200 flex flex-col items-center';
+
+                    // 用紙上部ヘッダー（ページ番号・仕様表示）
+                    const pageHeader = document.createElement('div');
+                    pageHeader.className = 'w-full flex justify-between items-center text-[11px] mb-2 ui-font';
+                    pageHeader.style.color = borderColor;
+                    pageHeader.innerHTML = `
+                        <span>${state.cols}字 × ${state.rows}行 (${state.cols * state.rows}字詰)</span>
+                        <span>- ${pageIndex + 1} / ${pagesData.length} 枚 -</span>
+                    `;
+                    pageWrapper.appendChild(pageHeader);
+
+                    // 外枠フレーム
+                    const outerFrame = document.createElement('div');
+                    outerFrame.style.border = `2px solid ${borderColor}`;
+                    outerFrame.style.padding = '3px';
+                    outerFrame.style.backgroundColor = '#fffefb';
+
+                    // グリッド本体
+                    const gridContainer = document.createElement('div');
+                    gridContainer.className = isVertical ? 'writing-vertical flex flex-col' : 'writing-horizontal flex flex-col';
+                    gridContainer.style.border = `1px solid ${borderColor}`;
+                    gridContainer.style.setProperty('--cell-font-size', `${fontSize}px`);
+
+                    const midRowIndex = Math.floor(state.rows / 2);
+
+                    pageLines.forEach((lineCells, rowIndex) => {
+                        // 10行以上の場合は中央に魚尾（折り目スペース）を挿入
+                        if (state.rows >= 10 && rowIndex === midRowIndex) {
+                            gridContainer.appendChild(createFishtailElement(borderColor, isVertical));
+                        }
+
+                        const rowEl = document.createElement('div');
+                        rowEl.className = 'flex';
+                        if (!isVertical) {
+                            rowEl.style.flexDirection = 'row';
+                        }
+
+                        lineCells.forEach((cellData, colIndex) => {
+                            const cell = document.createElement('div');
+                            cell.className = 'grid-cell';
+                            cell.style.width = `${cellSize}px`;
+                            cell.style.height = `${cellSize}px`;
+                            cell.style.borderColor = borderColor;
+                            cell.style.borderWidth = '0.5px';
+
+                            if (cellData) {
+                                const charSpan = document.createElement('span');
+                                charSpan.textContent = cellData.char === ' ' ? '\u00A0' : cellData.char;
+                                cell.appendChild(charSpan);
+
+                                // ぶら下げ文字（句読点・閉じ括弧）がある場合は同マス内に配置
+                                if (cellData.hanging) {
+                                    const hangSpan = document.createElement('span');
+                                    hangSpan.className = 'hanging-punct';
+                                    hangSpan.textContent = cellData.hanging;
+                                    cell.appendChild(hangSpan);
+                                }
+                            }
+
+                            rowEl.appendChild(cell);
+                        });
+
+                        gridContainer.appendChild(rowEl);
+                    });
+
+                    outerFrame.appendChild(gridContainer);
+                    pageWrapper.appendChild(outerFrame);
+                    manuscriptContainer.appendChild(pageWrapper);
+                });
+            }
+
+            // 縦書き・横書き切り替えボタン設定
+            function setDirection(dir) {
+                state.direction = dir;
+                if (dir === 'vertical') {
+                    btnDirVertical.className = 'dir-btn py-2 px-3 rounded-xl border text-sm font-medium flex items-center justify-center space-x-2 transition bg-amber-500 text-white border-amber-600 shadow-sm';
+                    btnDirHorizontal.className = 'dir-btn py-2 px-3 rounded-xl border text-sm font-medium flex items-center justify-center space-x-2 transition bg-white text-slate-700 border-slate-200 hover:bg-slate-50';
+                } else {
+                    btnDirHorizontal.className = 'dir-btn py-2 px-3 rounded-xl border text-sm font-medium flex items-center justify-center space-x-2 transition bg-amber-500 text-white border-amber-600 shadow-sm';
+                    btnDirVertical.className = 'dir-btn py-2 px-3 rounded-xl border text-sm font-medium flex items-center justify-center space-x-2 transition bg-white text-slate-700 border-slate-200 hover:bg-slate-50';
+                }
+                renderManuscript();
+            }
+
+            btnDirVertical.addEventListener('click', () => setDirection('vertical'));
+            btnDirHorizontal.addEventListener('click', () => setDirection('horizontal'));
+
+            // 行数・列数の変更イベント
+            inputCols.addEventListener('change', () => {
+                let val = parseInt(inputCols.value, 10);
+                if (isNaN(val) || val < 5) val = 5;
+                if (val > 40) val = 40;
+                inputCols.value = val;
+                state.cols = val;
+                updateCharacterCount();
+                renderManuscript();
+            });
+
+            inputRows.addEventListener('change', () => {
+                let val = parseInt(inputRows.value, 10);
+                if (isNaN(val) || val < 5) val = 5;
+                if (val > 40) val = 40;
+                inputRows.value = val;
+                state.rows = val;
+                updateCharacterCount();
+                renderManuscript();
+            });
+
+            // 枠線カラー変更イベント
+            document.querySelectorAll('input[name="gridColor"]').forEach(radio => {
+                radio.addEventListener('change', (e) => {
+                    state.color = e.target.value;
+                    renderManuscript();
+                });
+            });
+
+            // 原稿用紙ルール切り替え
+            chkManuscriptRules.addEventListener('change', (e) => {
+                state.applyRules = e.target.checked;
+                updateCharacterCount();
+                renderManuscript();
+            });
+
+            // クイック設定プリセットボタン
+            document.querySelectorAll('.btn-preset').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const cols = parseInt(btn.dataset.cols, 10);
+                    const rows = parseInt(btn.dataset.rows, 10);
+                    state.cols = cols;
+                    state.rows = rows;
+                    inputCols.value = cols;
+                    inputRows.value = rows;
+                    updateCharacterCount();
+                    renderManuscript();
+                });
+            });
+
+            // リアルタイム入力イベント
+            textInput.addEventListener('input', () => {
+                updateCharacterCount();
+                renderManuscript();
+            });
+
+            // 入力クリア
+            btnClear.addEventListener('click', async () => {
+                const ok = await showConfirm('入力内容を消去してもよろしいですか？', '入力の消去');
+                if (ok) {
+                    textInput.value = '';
+                    updateCharacterCount();
+                    renderManuscript();
+                    showToast('入力内容を消去しました');
+                }
+            });
+
+            /**
+             * 条件⑤: 入力内容全体を印刷できる
+             */
+            btnPrint.addEventListener('click', () => {
+                window.print();
+            });
+
+            /**
+             * .txt ファイルダウンロード機能
+             */
+            btnExportTxt.addEventListener('click', () => {
+                if (!textInput.value) {
+                    showToast('保存するテキストがありません。', true);
+                    return;
+                }
+                const blob = new Blob([textInput.value], { type: 'text/plain;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `原稿用紙原稿_${new Date().toISOString().slice(0, 10)}.txt`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                showToast('テキストファイルをダウンロードしました');
+            });
+
+            /**
+             * 条件④: 入力内容を保存 (下書き一覧管理)
+             */
+            function getSavedDrafts() {
+                try {
+                    const drafts = localStorage.getItem('genkou_saved_drafts');
+                    if (drafts) {
+                        memoryDrafts = JSON.parse(drafts);
+                    }
+                } catch (e) {
+                    console.warn('ストレージアクセスエラー:', e);
+                }
+                return Array.isArray(memoryDrafts) ? memoryDrafts : [];
+            }
+
+            function saveDraft(title) {
+                if (!textInput.value.trim()) {
+                    showToast('保存する文章が入力されていません。', true);
+                    return;
+                }
+                const drafts = getSavedDrafts();
+                const now = new Date();
+                const uniqueId = `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+                
+                const newDraft = {
+                    id: uniqueId,
+                    title: title || `無題の原稿 (${now.toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })})`,
+                    text: textInput.value,
+                    cols: state.cols,
+                    rows: state.rows,
+                    direction: state.direction,
+                    color: state.color,
+                    updatedAt: now.toLocaleString('ja-JP')
+                };
+                
+                drafts.unshift(newDraft);
+                memoryDrafts = drafts;
+                
+                try {
+                    localStorage.setItem('genkou_saved_drafts', JSON.stringify(drafts));
+                } catch (e) {
+                    console.warn('localStorage保存エラー:', e);
+                }
+                
+                showToast('下書きを保存しました');
+                renderDraftsList();
+                draftTitle.value = '';
+            }
+
+            function deleteDraft(id) {
+                let drafts = getSavedDrafts();
+                drafts = drafts.filter(d => String(d.id) !== String(id));
+                memoryDrafts = drafts;
+                
+                try {
+                    localStorage.setItem('genkou_saved_drafts', JSON.stringify(drafts));
+                } catch (e) {}
+                
+                renderDraftsList();
+                showToast('下書きを削除しました');
+            }
+
+            function loadDraft(draft) {
+                textInput.value = draft.text;
+                state.cols = draft.cols || 20;
+                state.rows = draft.rows || 20;
+                state.direction = draft.direction || 'horizontal';
+                state.color = draft.color || 'green';
+
+                inputCols.value = state.cols;
+                inputRows.value = state.rows;
+                
+                setDirection(state.direction);
+
+                // ラジオボタンの選択状態更新
+                const radio = document.querySelector(`input[name="gridColor"][value="${state.color}"]`);
+                if (radio) radio.checked = true;
+
+                updateCharacterCount();
+                renderManuscript();
+                modalSaveLoad.classList.add('hidden');
+                showToast(`「${draft.title}」を読み込みました`);
+            }
+
+            function renderDraftsList() {
+                const drafts = getSavedDrafts();
+                draftsList.innerHTML = '';
+
+                if (drafts.length === 0) {
+                    draftsList.innerHTML = '<p class="text-xs text-slate-400 py-4 text-center">保存された下書きはありません。</p>';
+                    return;
+                }
+
+                drafts.forEach(draft => {
+                    const item = document.createElement('div');
+                    item.className = 'bg-slate-50 hover:bg-amber-50/50 border border-slate-200 hover:border-amber-300 p-3 rounded-xl flex items-center justify-between transition cursor-pointer group';
+                    item.innerHTML = `
+                        <div class="flex-1 min-w-0 mr-2">
+                            <h4 class="text-sm font-bold text-slate-800 truncate">${escapeHtml(draft.title)}</h4>
+                            <p class="text-[11px] text-slate-400 mt-0.5">${draft.updatedAt} • ${draft.text.replace(/\s/g, '').length}字</p>
+                        </div>
+                        <div class="flex items-center space-x-1 shrink-0">
+                            <button type="button" class="btn-load-item bg-amber-600 hover:bg-amber-500 text-white text-xs px-2.5 py-1 rounded-md transition">開く</button>
+                            <button type="button" class="btn-del-item text-slate-400 hover:text-red-500 p-1.5 transition"><i class="fa-solid fa-trash-can"></i></button>
+                        </div>
+                    `;
+
+                    item.querySelector('.btn-load-item').addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        loadDraft(draft);
+                    });
+                    item.addEventListener('click', () => loadDraft(draft));
+
+                    item.querySelector('.btn-del-item').addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        const ok = await showConfirm(`「${draft.title}」を削除しますか？`, '下書きの削除');
+                        if (ok) {
+                            deleteDraft(draft.id);
+                        }
+                    });
+
+                    draftsList.appendChild(item);
+                });
+            }
+
+            // XSS防止エスケープ
+            function escapeHtml(str) {
+                return String(str).replace(/[&<>"']/g, (m) => ({
+                    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
+                })[m]);
+            }
+
+            // モーダル開閉
+            btnSave.addEventListener('click', () => {
+                renderDraftsList();
+                modalSaveLoad.classList.remove('hidden');
+                draftTitle.focus();
+            });
+
+            btnLoadModal.addEventListener('click', () => {
+                renderDraftsList();
+                modalSaveLoad.classList.remove('hidden');
+            });
+
+            btnCloseModal.addEventListener('click', () => {
+                modalSaveLoad.classList.add('hidden');
+            });
+
+            btnConfirmSave.addEventListener('click', () => {
+                saveDraft(draftTitle.value.trim());
+            });
+
+            // Enterキーでの保存に対応
+            draftTitle.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    saveDraft(draftTitle.value.trim());
+                }
+            });
+
+            // 初期自動読み込み
+            let savedText = null;
+            try {
+                savedText = localStorage.getItem('genkou_current_text');
+            } catch (e) {}
+
+            if (savedText !== null) {
+                textInput.value = savedText;
+            } else {
+                // サンプル文章の初期挿入（禁忌テスト用テキスト含む）
+                textInput.value = "吾輩は猫である。名前はまだ無い。\n　どこで生れたかとんと見当がつかぬ。何でも薄暗いじめじめした所でニャーニャー泣いていた事だけは記憶している。\n　吾輩はここで始めて人間というものを見た。";
+            }
+
+            updateCharacterCount();
+            renderManuscript();
+        });
+    </script>
+</body>
+</html>
